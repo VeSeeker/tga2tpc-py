@@ -1,16 +1,15 @@
-# tga2tpc (Python)
+# tga2tpc-py
 
-A self-contained Python reimplementation of [ndix UR's
+A self-contained Python rewrite of [ndix UR's
 tga2tpc](https://github.com/ndixUR/tga2tpc) 4.0.0. It converts Targa (`.tga`)
 textures into BioWare Odyssey engine `.tpc` textures, including DXT1/DXT3/DXT5
 compression, mipmaps, animated sheets and cube maps.
 
-The runtime dependency is **NumPy only** — no Electron, pykotor or external
-compression library is required.
+The runtime dependency is only NumPy.
 
 ## Features
 
-- TGA image types 1, 2, 3, 9, 10 and 11 (indexed, true-colour and greyscale,
+- TGA image types 1, 2, 3, 9, 10 and 11 (indexed, true-color and greyscale,
   with or without RLE).
 - 8, 16, 24 and 32-bit pixels, all four image origins.
 - Automatic format selection or explicit `dxt1`, `dxt3`, `dxt5`, `none`
@@ -23,8 +22,8 @@ compression library is required.
 - Animated texture sheets and vertically stacked cube maps.
 - Horizontal/vertical flips and TPC alpha-blending override.
 - Five DXT quality profiles (`super_fast`, `fast`, `normal`, `slow`, `ultra`).
-- Alpha-weighted DXT3/DXT5 colour fitting: transparent texels no longer pull
-  block endpoints away from the colours that are actually visible.
+- Alpha-weighted DXT3/DXT5 color fitting: transparent texels no longer pull
+  block endpoints away from the colors that are actually visible.
 - Parallel batch conversion using a process or thread pool, with recursive
   directory discovery and preserved relative output paths.
 - Readable per-file output, dry-run, skip-existing and fail-fast modes.
@@ -38,45 +37,47 @@ compression library is required.
 
 From this directory:
 
-```bash
-python3 -m pip install .
+#### Windows
 ```
-
-or, with `uv`:
-
-```bash
-uv pip install .
+py -m pip install .
 ```
-
-You can also run the package without installing it:
-
-```bash
-python3 -m tga2tpc --help
+#### Mac/Linux
 ```
+python -m pip install .
+```
+## Run without installing
 
+#### Windows
+```
+py -m tga2tpc --help
+```
+#### Mac/Linux
+```
+python -m tga2tpc --help
+```
 ## Usage
 
 Convert a directory recursively using automatic format selection:
 
-```bash
-tga2tpc -i ./textures -o ./override
+```
+tga2tpc -i ./inputFolder -o ./outputFolder
 ```
 
 Force DXT5 compression and use all CPU cores:
 
-```bash
+```
 tga2tpc -i ./textures -o ./override -compression dxt5 -cores 0
 ```
 
 Convert one file with a specific TXI file and flip it horizontally:
 
-```bash
+```
 tga2tpc -i art/logo.tga -o out/logo.tpc -compression none --txi-file art/logo.txi --flip-x
 ```
 
 Preview the planned work without writing anything:
 
-```bash
+```
 tga2tpc -i ./textures -o ./override --dry-run
 ```
 
@@ -95,7 +96,7 @@ tga2tpc -i ./textures -o ./override --dry-run
 | `--txi-file PATH`, `--txi-text TEXT` | Use an explicit TXI source for every input. |
 | `--no-txi`, `--no-txi-autoload`, `--no-txi-output` | Disable all TXI handling, only autoloading, or only embedding. |
 | `--alpha-blending FLOAT` | Override the TPC alpha-blending field. |
-| `--no-alpha-weighted` | Fit DXT colour equally across transparent texels (the original encoder's unweighted behaviour). |
+| `--no-alpha-weighted` | Fit DXT color equally across transparent texels. |
 | `--no-recursive`, `--flatten` | Do not descend into subdirectories; write all outputs into one directory. |
 | `--no-overwrite`, `--dry-run`, `--fail-fast` | Batch safety and diagnostics. |
 
@@ -119,36 +120,23 @@ Explicit `none` writes RGB for 24-bit input and RGBA otherwise. Explicit
 
 A sibling `.txi` file with the same stem is loaded automatically:
 
-```text
-# alphablending 0.75
-proceduretype cycle
-numx 4
-numy 4
-fps 8
-```
-
-The `# alphablending` value is applied to the TPC header and the comment is
-removed from the embedded TXI text. Other directives are preserved, normalised
-to CRLF line endings and appended to the TPC after the pixel data, matching the
-original tool.
-
 Animated textures require DXT output; uncompressed animations are rejected
-with a clear error, as in the original implementation.
+with an error, as in the original implementation.
 
-## Differences from the original 4.0.0 build
+## Differences from the original JavaScript build
 
 The output is intentionally compatible rather than byte-for-byte identical in
 every historical edge case:
 
 - Greyscale textures write `dataSize = 0`. The original wrote an uncompressed
   size there, which contradicts its own uncompressed-format convention.
-- 16-bit true-colour TGAs use correct 5/6/5 bit expansion and alpha-bit
+- 16-bit true-color TGAs use correct 5/6/5 bit expansion and alpha-bit
   handling instead of the original loader's truncated shifts and inverted
   alpha.
 - The final 2×2 → 1×1 bicubic mipmap is generated correctly instead of
   producing NaN pixels for square power-of-two textures.
 - Requesting `dxt3` writes real 16-byte DXT3 blocks. The original build
-  accidentally wrote an unreadable DXT1-sized payload while declaring a DXT3
+  wrote an unreadable DXT1-sized payload while declaring a DXT3
   data size. Note that the TPC container has no separate DXT3/DXT5 tag:
   encoding 4 is usually interpreted as DXT5 by the game and by
   `xoreostex2tga`, so prefer `dxt5` for alpha textures that must render
@@ -157,27 +145,12 @@ every historical edge case:
 - DXT compression is a NumPy encoder rather than libsquish/Compressonator.
   File headers, sizes and mip layouts match, and quality is comparable, but
   compressed pixel bytes are not identical to the JavaScript build.
-- DXT3/DXT5 colour fitting is alpha-weighted by default.  Source art often
+- DXT3/DXT5 color fitting is alpha-weighted by default.  Source art often
   stores black or arbitrary RGB in texels whose alpha is zero; the original
   encoder fitted those invisible texels on equal terms, which pulled block
   endpoints toward black and made sparse additive FX textures look faint or
   washed out after a roundtrip.  Pass `--no-alpha-weighted` for the original
   unweighted fit.
-
-### DXT roundtrip brightness
-
-DXT1/DXT3/DXT5 are lossy: colours are reduced to RGB565 endpoints plus two
-interpolated palette entries per 4×4 block.  Some TPC-to-TGA tools (including
-`xoreostex2tga`) expand the five- and six-bit endpoint channels with truncating
-shifts (`r << 3`, `g << 2`, `b << 3`).  That decoding is up to 7 levels darker
-than the bit-replicating expansion used by Direct3D-style decoders, so a
-decoded TGA will usually measure darker than the source even when the TPC is
-correct.  Alpha-weighted fitting removes the encoder-side part of that loss;
-the remaining endpoint-quantisation and decoder-expansion differences are
-inherent to the format.
-
-Uncompressed bilinear and bicubic output has been validated byte-for-byte
-against the original writer (apart from the documented fixes above).
 
 ## Development
 
@@ -208,10 +181,3 @@ Manifest example:
   }
 ]
 ```
-
-## License
-
-GPL-3.0-or-later, matching the original tga2tpc project. See `LICENSE`.
-
-This project is an independent reimplementation and is not affiliated with
-BioWare, LucasArts or the original tga2tpc author.
