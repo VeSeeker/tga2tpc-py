@@ -1,9 +1,6 @@
 # tga2tpc-py
 
-A self-contained Python rewrite of [ndix UR's
-tga2tpc](https://github.com/ndixUR/tga2tpc) 4.0.0. It converts Targa (`.tga`)
-textures into BioWare Odyssey engine `.tpc` textures, including DXT1/DXT3/DXT5
-compression, mipmaps, animated sheets and cube maps.
+A self-contained AI Python rewrite of [ndix UR's tga2tpc](https://github.com/ndixUR/tga2tpc) 4.0.0. It converts Targa (`.tga`) textures into BioWare Odyssey engine `.tpc` textures, including DXT1/DXT3/DXT5 compression, mipmaps, animated sheets and cube maps.
 
 The runtime dependency is only NumPy.
 
@@ -81,7 +78,7 @@ Preview the planned work without writing anything:
 tga2tpc -i ./textures -o ./override --dry-run
 ```
 
-### Important options
+### Important parameters
 
 | Option | Description |
 | --- | --- |
@@ -113,44 +110,24 @@ When `-compression auto` is used:
 | 32-bit TGA | `DXT5` |
 | Bump map with `isbumpmap 1` and `compresstexture 0`, no `proceduretype`, depth ≥ 24 | Uncompressed RGBA |
 
-Explicit `none` writes RGB for 24-bit input and RGBA otherwise. Explicit
-`gray` always writes greyscale.
+Explicit `none` writes RGB for 24-bit input and RGBA otherwise. Explicit `gray` always writes greyscale.
 
 ## TXI handling
 
 A sibling `.txi` file with the same stem is loaded automatically:
 
-Animated textures require DXT output; uncompressed animations are rejected
-with an error, as in the original implementation.
+Animated textures require DXT output; uncompressed animations are rejected with an error, as in the original implementation.
 
 ## Differences from the original JavaScript build
 
-The output is intentionally compatible rather than byte-for-byte identical in
-every historical edge case:
+The output is intentionally compatible rather than byte-for-byte identical in every historical edge case:
 
-- Greyscale textures write `dataSize = 0`. The original wrote an uncompressed
-  size there, which contradicts its own uncompressed-format convention.
-- 16-bit true-color TGAs use correct 5/6/5 bit expansion and alpha-bit
-  handling instead of the original loader's truncated shifts and inverted
-  alpha.
-- The final 2×2 → 1×1 bicubic mipmap is generated correctly instead of
-  producing NaN pixels for square power-of-two textures.
-- Requesting `dxt3` writes real 16-byte DXT3 blocks. The original build
-  wrote an unreadable DXT1-sized payload while declaring a DXT3
-  data size. Note that the TPC container has no separate DXT3/DXT5 tag:
-  encoding 4 is usually interpreted as DXT5 by the game and by
-  `xoreostex2tga`, so prefer `dxt5` for alpha textures that must render
-  correctly. `dxt3` remains available for encoder experiments and for tools
-  that can select the block format externally.
-- DXT compression is a NumPy encoder rather than libsquish/Compressonator.
-  File headers, sizes and mip layouts match, and quality is comparable, but
-  compressed pixel bytes are not identical to the JavaScript build.
-- DXT3/DXT5 color fitting is alpha-weighted by default.  Source art often
-  stores black or arbitrary RGB in texels whose alpha is zero; the original
-  encoder fitted those invisible texels on equal terms, which pulled block
-  endpoints toward black and made sparse additive FX textures look faint or
-  washed out after a roundtrip.  Pass `--no-alpha-weighted` for the original
-  unweighted fit.
+- Greyscale textures write `dataSize = 0`. The original wrote an uncompressed size there, which contradicts its own uncompressed-format convention.
+- 16-bit true-color TGAs use correct 5/6/5 bit expansion and alpha-bit handling instead of the original loader's truncated shifts and inverted alpha.
+- The final 2×2 → 1×1 bicubic mipmap is generated correctly instead of producing NaN pixels for square power-of-two textures.
+- Requesting `dxt3` writes real 16-byte DXT3 blocks. The original build wrote an unreadable DXT1-sized payload while declaring a DXT3 data size. Note that the TPC container has no separate DXT3/DXT5 tag: encoding 4 is usually interpreted as DXT5 by the game and by `xoreostex2tga`, so prefer `dxt5` for alpha textures that must render correctly. `dxt3` remains available for encoder experiments and for tools that can select the block format externally.
+- DXT compression is a NumPy encoder rather than libsquish/Compressonator. File headers, sizes and mip layouts match, and quality is comparable, but compressed pixel bytes are not identical to the JavaScript build.
+- DXT3/DXT5 color fitting is alpha-weighted by default.  Source art often stores black or arbitrary RGB in texels whose alpha is zero; the original encoder fitted those invisible texels on equal terms, which pulled block endpoints toward black and made sparse additive FX textures look faint or washed out after a roundtrip.  Pass `--no-alpha-weighted` for the original unweighted fit.
 
 ## Development
 
@@ -160,9 +137,7 @@ Run the test suite:
 python3 -m pytest
 ```
 
-Optional integration tests compare output against reference TPCs produced by
-the original JavaScript tool. Provide a JSON manifest with entries containing
-`tga`, `reference`, and optional conversion option fields, then set:
+Optional integration tests compare output against reference TPCs produced by the original JavaScript tool. Provide a JSON manifest with entries containing `tga`, `reference`, and optional conversion option fields, then set:
 
 ```bash
 export TGA2TPC_REFERENCE_MANIFEST=/path/to/manifest.json
