@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tga2tpc import __version__
 from tga2tpc.cli import _make_options, build_parser, main
 
 from .helpers import make_truecolour_tga
@@ -287,7 +288,7 @@ def test_version_subprocess():
         timeout=60,
     )
     assert result.returncode == 0
-    assert "4.0.0" in result.stdout
+    assert __version__ in result.stdout
 
 
 def test_missing_input(tmp_path, capsys):

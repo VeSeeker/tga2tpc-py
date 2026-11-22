@@ -224,6 +224,8 @@ def _decode_pixels(
     image_type: int,
     flags: int,
     palette: np.ndarray | None,
+    *,
+    xoreos_compat: bool = False,
 ) -> np.ndarray:
     """Convert flat file-order pixels to an RGBA array in file order."""
 
@@ -271,12 +273,22 @@ def _decode_pixels(
             r5 = (values >> 10) & 0x1F
             g5 = (values >> 5) & 0x1F
             b5 = values & 0x1F
-            rgba[:, 0] = _expand_5bit(r5)
-            rgba[:, 1] = _expand_5bit(g5)
-            rgba[:, 2] = _expand_5bit(b5)
-            attribute_bits = flags & 0x0F
-            if attribute_bits:
+            if xoreos_compat:
+                # xoreos-tools expands 16-bit TGA colours by shifting only,
+                # and always takes the alpha bit from bit 15.
+                rgba[:, 0] = (r5 << 3).astype(np.uint8)
+                rgba[:, 1] = (g5 << 3).astype(np.uint8)
+                rgba[:, 2] = (b5 << 3).astype(np.uint8)
                 rgba[:, 3] = np.where(values & 0x8000, 255, 0).astype(np.uint8)
+            else:
+                rgba[:, 0] = _expand_5bit(r5)
+                rgba[:, 1] = _expand_5bit(g5)
+                rgba[:, 2] = _expand_5bit(b5)
+                attribute_bits = flags & 0x0F
+                if attribute_bits:
+                    rgba[:, 3] = np.where(values & 0x8000, 255, 0).astype(
+                        np.uint8
+                    )
         elif pixel_depth == 24:
             values = np.frombuffer(raw, dtype=np.uint8, count=count * 3).reshape(
                 -1, 3
@@ -312,8 +324,40 @@ def _orient(pixels: np.ndarray, origin: int) -> np.ndarray:
     raise TGAError(f"unsupported TGA origin: {origin}")
 
 
-def decode_tga(data: bytes) -> TGAImage:
-    """Decode TGA bytes into a :class:`TGAImage`."""
+def _xoreos_flip_flat(
+    data: np.ndarray, width: int, height: int, bpp: int
+) -> np.ndarray:
+    """Reproduce xoreos' ``flipVertically`` on a flat pixel buffer.
+
+    xoreos passes the *file* pixel depth to the flip helper even after it has
+    converted 16-bit and 8-bit images to four bytes per pixel.  For those
+    formats the flip therefore operates on a too-small pitch; this helper
+    keeps that behaviour for byte-exact output.
+    """
+
+    if width <= 0 or height <= 0 or bpp <= 0:
+        return data
+
+    flat = np.ascontiguousarray(data).reshape(-1).copy()
+    pitch = bpp * width
+    for y in range(height // 2):
+        start = y * pitch
+        end = (height - 1 - y) * pitch
+        first = flat[start : start + pitch].copy()
+        flat[start : start + pitch] = flat[end : end + pitch]
+        flat[end : end + pitch] = first
+    return flat.reshape(data.shape)
+
+
+def decode_tga(data: bytes, *, xoreos_compat: bool = False) -> TGAImage:
+    """Decode TGA bytes into a :class:`TGAImage`.
+
+    Normally ``pixels`` is in the conventional top-left canvas orientation.
+    With ``xoreos_compat`` the decoder instead reproduces xoreos-tools' TGA
+    loader: the result is xoreos' internal, bottom-up pixel buffer, the
+    horizontal origin bit is ignored, 16-bit pixels use xoreos' truncating
+    expansion, and its 8/16-bit flip quirk is preserved.
+    """
 
     header = _read_header(data)
     _check_header(header)
@@ -361,9 +405,37 @@ def decode_tga(data: bytes) -> TGAImage:
         header.image_type,
         header.flags,
         palette,
+        xoreos_compat=xoreos_compat,
     )
-    origin_bits = (header.flags & 0x30) >> 4
-    pixels = np.ascontiguousarray(_orient(file_pixels, origin_bits))
+    if xoreos_compat:
+        # Return xoreos-tools' internal (post-load) pixel buffer.  Its TGA
+        # loader only honours the upper-left origin bit and, for 8/16-bit
+        # input, flips using the file's original bytes-per-pixel.
+        origin_bits = 2 if (header.flags & 0x20) else 0
+        if header.pixel_depth == 16:
+            xoreos_bytes = file_pixels
+        elif header.pixel_depth == 24:
+            xoreos_bytes = file_pixels[:, :, [2, 1, 0]]
+        else:
+            xoreos_bytes = file_pixels[:, :, [2, 1, 0, 3]]
+        if header.flags & 0x20:
+            xoreos_bytes = _xoreos_flip_flat(
+                xoreos_bytes,
+                header.width,
+                header.height,
+                max(header.pixel_depth // 8, 1),
+            )
+        if header.pixel_depth == 24:
+            pixels = np.empty(
+                (header.height, header.width, 4), dtype=np.uint8
+            )
+            pixels[:, :, :3] = xoreos_bytes[:, :, [2, 1, 0]]
+            pixels[:, :, 3] = 255
+        else:
+            pixels = np.ascontiguousarray(xoreos_bytes[:, :, [2, 1, 0, 3]])
+    else:
+        origin_bits = (header.flags & 0x30) >> 4
+        pixels = np.ascontiguousarray(_orient(file_pixels, origin_bits))
 
     return TGAImage(
         pixels=pixels,
@@ -387,3 +459,51 @@ def load_tga(path: str | Path) -> TGAImage:
         return decode_tga(data)
     except TGAError as exc:
         raise TGAError(f"{path}: {exc}") from exc
+
+
+def encode_tga(pixels: np.ndarray) -> bytes:
+    """Encode internal RGBA pixels as a 32-bit uncompressed TGA image.
+
+    This mirrors xoreos-tools' TGA dumper: the image is written as an
+    uncompressed true-colour TGA with a bottom-left origin (descriptor 0),
+    and rows are emitted in the order they appear in ``pixels``.
+    """
+
+    if pixels.ndim != 3 or pixels.shape[2] != 4:
+        raise TGAError("TGA output must be an (h, w, 4) RGBA array")
+    if pixels.dtype != np.uint8:
+        pixels = pixels.astype(np.uint8, copy=False)
+
+    height, width = pixels.shape[:2]
+    if width <= 0 or height <= 0:
+        raise TGAError("cannot write an empty TGA image")
+    if width > 0xFFFF or height > 0xFFFF:
+        raise TGAError(f"TGA dimensions are too large: {width}x{height}")
+
+    header = struct.pack(
+        "<BBBHHBHHHHBB",
+        0,  # ID length
+        0,  # colour-map type
+        2,  # uncompressed true-colour
+        0,  # colour-map index
+        0,  # colour-map length
+        0,  # colour-map entry size
+        0,  # X origin
+        0,  # Y origin
+        width,
+        height,
+        32,  # bits per pixel
+        0,  # bottom-left origin, no alpha bits
+    )
+    body = np.ascontiguousarray(pixels[:, :, [2, 1, 0, 3]]).tobytes()
+    return header + body
+
+
+def write_tga(path: str | Path, pixels: np.ndarray) -> int:
+    """Write internal RGBA pixels to ``path`` and return the byte count."""
+
+    data = encode_tga(pixels)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return len(data)

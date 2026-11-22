@@ -1,6 +1,6 @@
 # tga2tpc-py
 
-A self-contained AI Python rewrite of [ndix UR's tga2tpc](https://github.com/ndixUR/tga2tpc) 4.0.0. It converts Targa (`.tga`) textures into BioWare Odyssey engine `.tpc` textures, including DXT1/DXT3/DXT5 compression, mipmaps, animated sheets and cube maps.
+A self-contained AI Python rewrite of [ndix UR's tga2tpc](https://github.com/ndixUR/tga2tpc) 4.0.0. It converts Targa (`.tga`) textures into BioWare Odyssey engine `.tpc` textures, including DXT1/DXT3/DXT5 compression, mipmaps, animated sheets and cube maps. It also includes a compatible reverse converter, [xoreo-tools](https://github.com/xoreos/xoreos-tools) `xoreostex2tga` and `tex2tga`, which turns TPC, DDS, TXB and TGA textures back into TGA images.
 
 The runtime dependency is only NumPy.
 
@@ -24,6 +24,8 @@ The runtime dependency is only NumPy.
 - Parallel batch conversion using a process or thread pool, with recursive
   directory discovery and preserved relative output paths.
 - Readable per-file output, dry-run, skip-existing and fail-fast modes.
+- A reverse converter, `xoreostex2tga` / `tex2tga`, for TPC, DDS, TXB and TGA
+  inputs, with xoreos-tools-compatible S3TC decoding and TGA output.
 
 ## Requirements
 
@@ -51,6 +53,12 @@ py -m tga2tpc --help
 #### Mac/Linux
 ```
 python -m tga2tpc --help
+```
+
+The reverse converter can also be run without installing:
+
+```
+python -m tga2tpc.tex2tga --help
 ```
 ## Usage
 
@@ -118,6 +126,37 @@ A sibling `.txi` file with the same stem is loaded automatically:
 
 Animated textures require DXT output; uncompressed animations are rejected with an error, as in the original implementation.
 
+## Converting textures back to TGA
+
+The package also installs `xoreostex2tga` and `tex2tga`, Python ports of
+xoreos-tools' texture dumper. They read BioWare TPC, Xbox TXB, DirectDraw
+Surface (DDS) and Targa inputs and write 32-bit uncompressed TGA images:
+
+```bash
+# One file; the output defaults to a sibling .tga
+xoreostex2tga art/visas.tpc
+
+# Explicit output path
+tex2tga --tpc art/visas.tpc out/visas.tga
+
+# Convert a directory recursively, preserving relative paths
+tex2tga -i ./textures -o ./tga
+
+# Preview without writing
+tex2tga -i ./textures -o ./tga --dry-run
+```
+
+Inputs are detected from the DDS magic or the file extension; use `--dds`,
+`--tpc`, `--txb` or `--tga` to override detection. TPC files with embedded TXI
+data also write a `.txi` sidecar unless `--no-txi` is passed.
+
+Output matches xoreos-tools: a 32-bit uncompressed true-colour TGA with a
+bottom-left origin, only mip level 0 of each texture layer, and multiple layers
+(for cube maps) stacked vertically. The DXT1/DXT3/DXT5 decoder deliberately
+reproduces xoreos' truncating colour expansion, DXT3 alpha nibble handling and
+DXT5 alpha bit ordering, so DDS conversions can be byte-identical to
+`xoreostex2tga` output.
+
 ## Differences from the original JavaScript build
 
 The output is intentionally compatible rather than byte-for-byte identical in every historical edge case:
@@ -142,6 +181,14 @@ Optional integration tests compare output against reference TPCs produced by the
 ```bash
 export TGA2TPC_REFERENCE_MANIFEST=/path/to/manifest.json
 python3 -m pytest -m integration
+```
+
+The reverse-converter tests use `../exampleTextures` when it exists. To compare
+against a real xoreos-tools binary byte for byte, point `XOREOSTEX2TGA` at it:
+
+```bash
+export XOREOSTEX2TGA=/path/to/xoreostex2tga
+python3 -m pytest tests/test_tex2tga.py
 ```
 
 Manifest example:
